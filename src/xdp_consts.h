@@ -9,5 +9,6 @@
 #define MAX_MAP_ENTRIES 1024
 #define MAX_SEGMENTLIST_ENTRIES 10
 #define IPPROTO_IPV6ROUTE 43
+#define MAX_CPUS 128
 
 #endif

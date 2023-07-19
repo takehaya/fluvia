@@ -22,7 +22,6 @@ SEC("xdp")
 int xdp_prog(struct xdp_md *ctx) {
 	void *data_end = (void *)(long)ctx->data_end;
 	void *data = (void *)(long)ctx->data;
-	__u32 probe_key = XDP_PASS;
 	struct ethhdr *eth = data;
 
     if ((void *)(eth + 1) > data_end)
@@ -46,43 +45,35 @@ int xdp_prog(struct xdp_md *ctx) {
     if (srh->routingType != IPV6_SRCRT_TYPE_4) // IPV6_SRCRT_TYPE_4 = SRH
         return XDP_PASS;
 
-    struct probe_data key = {};
-    __u64 zero = 0, *value;
-    __builtin_memcpy(&key.h_source, &eth->h_source, ETH_ALEN);
-    __builtin_memcpy(&key.h_dest, &eth->h_dest, ETH_ALEN);
-    key.h_proto = eth->h_proto;
-    key.v6_srcaddr = ipv6->saddr;
-    key.v6_dstaddr = ipv6->daddr;
+    struct probe_data probe = {};
+    __builtin_memcpy(&probe.h_source, &eth->h_source, ETH_ALEN);
+    __builtin_memcpy(&probe.h_dest, &eth->h_dest, ETH_ALEN);
+    probe.h_proto = eth->h_proto;
+    probe.v6_srcaddr = ipv6->saddr;
+    probe.v6_dstaddr = ipv6->daddr;
 
-    key.nextHdr = srh->nextHdr;
-    key.hdrExtLen = srh->hdrExtLen;
-    key.routingType = srh->routingType;
-    key.segmentsLeft = srh->segmentsLeft;
-    key.lastEntry = srh->lastEntry;
-    key.flags = srh->flags;
-    key.tag = srh->tag;
+    probe.nextHdr = srh->nextHdr;
+    probe.hdrExtLen = srh->hdrExtLen;
+    probe.routingType = srh->routingType;
+    probe.segmentsLeft = srh->segmentsLeft;
+    probe.lastEntry = srh->lastEntry;
+    probe.flags = srh->flags;
+    probe.tag = srh->tag;
 
     for(int i=0; i<MAX_SEGMENTLIST_ENTRIES; i++ )
     {   
-        if (!(i < key.lastEntry + 1) )
+        if (!(i < probe.lastEntry + 1) )
             break;
         
         if ((void *)(data + sizeof(struct ethhdr) + sizeof(struct ipv6hdr) + sizeof(struct srhhdr) + sizeof(struct in6_addr) * (i + 1) + 1) > data_end)
             break;
 
-        __builtin_memcpy(&key.segments[i], &srh->segments[i], sizeof(struct in6_addr));
+        __builtin_memcpy(&probe.segments[i], &srh->segments[i], sizeof(struct in6_addr));
     }
 
-    value = bpf_map_lookup_elem(&ipfix_probe_map, &key);
-    if (!value) {
-        bpf_map_update_elem(&ipfix_probe_map, &key, &zero, BPF_NOEXIST);
-        value = bpf_map_lookup_elem(&ipfix_probe_map, &key);
-        if (!value)
-            return XDP_PASS;
-    }
-    (*value)++;
-
-	return XDP_PASS;
+    __u64 flags = BPF_F_CURRENT_CPU;
+    bpf_perf_event_output(ctx, &perf_event_ipfix_probe_map, flags, &probe, sizeof(probe));  
+    return XDP_PASS;
 }
 
 char _license[] SEC("license") = "MIT";
